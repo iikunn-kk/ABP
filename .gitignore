@@ -1,0 +1,42 @@
+# ==============================================
+# 规则：只保留 Assets/Scripts/Unity热更新中的AB包的上传下载 文件夹及其代码
+# ==============================================
+!/README.md
+
+# 1. 先拉黑根目录下所有文件/文件夹
+*
+
+# 2. 例外：不拉黑 .gitignore 本身
+!/.gitignore
+
+# 3. 例外：不拉黑 Assets 文件夹（必须保留父目录）
+!/Assets
+
+# 4. 拉黑 Assets 下的所有其他内容
+/Assets/*
+
+# 5. 例外：不拉黑 Assets/Scripts 文件夹和Editor文件夹
+!/Assets/Scripts/
+
+!/Assets/Editor/
+!/Assets/Editor/**/*
+
+# 6. 放行 ABP 文件夹及其所有内容
+!/Assets/Scripts/ABP
+!/Assets/Scripts/ABP/**/*
+
+
+
+
+# 7. 拉黑所有 .meta 文件（Unity自动生成）
+*.meta
+
+# 8. 拉黑Unity项目常见的临时/自动生成文件
+/Library/
+/Temp/
+/Obj/
+/Build/
+/Logs/
+/UserSettings/
+/.vs/
+/.idea/
