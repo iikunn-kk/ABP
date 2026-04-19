@@ -568,19 +568,23 @@ public class ABTools : EditorWindow
         // 先确保本地列表是最新的
         RefreshFileList();
 
-        // 下载远端对比文件
+        // 在主线程预缓存所有 Unity API 返回值
         string tmpPath = Application.persistentDataPath + "/ABCompareInfo_TMP.txt";
+        string ftpUrl = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], "ABCompareInfo.txt");
+        string ftpUser = ABHotUpdateConfig.FtpUser;
+        string ftpPassword = ABHotUpdateConfig.FtpPassword;
+        bool useFtps = ABHotUpdateConfig.UseFtps;
+
         Task.Run(() =>
         {
             try
             {
-                string url = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], "ABCompareInfo.txt");
-                FtpWebRequest req = (FtpWebRequest)WebRequest.Create(url);
-                req.Credentials = new NetworkCredential(ABHotUpdateConfig.FtpUser, ABHotUpdateConfig.FtpPassword);
+                FtpWebRequest req = (FtpWebRequest)WebRequest.Create(ftpUrl);
+                req.Credentials = new NetworkCredential(ftpUser, ftpPassword);
                 req.Proxy = null;
                 req.KeepAlive = false;
                 req.UsePassive = true;
-                req.EnableSsl = ABHotUpdateConfig.UseFtps;
+                req.EnableSsl = useFtps;
                 req.Method = WebRequestMethods.Ftp.DownloadFile;
                 req.UseBinary = true;
 
@@ -843,20 +847,25 @@ public class ABTools : EditorWindow
     private async void FtpUploadFileAsync(string filePath, string fileName, Action<bool> onDone)
     {
         bool ok = false;
+        // 在主线程预缓存，子线程中不能访问 Unity API 和实例字段
+        string ftpUrl = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], fileName);
+        string ftpUser = ABHotUpdateConfig.FtpUser;
+        string ftpPassword = ABHotUpdateConfig.FtpPassword;
+        bool useFtps = ABHotUpdateConfig.UseFtps;
+
         await Task.Run(() =>
         {
             try
             {
-                string url = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], fileName);
-                FtpWebRequest req = WebRequest.Create(url) as FtpWebRequest;
+                FtpWebRequest req = WebRequest.Create(ftpUrl) as FtpWebRequest;
                 if (req == null)
                     throw new InvalidOperationException("无法创建 FtpWebRequest，请检查 ftp:// 地址和端口。");
 
-                req.Credentials = new NetworkCredential(ABHotUpdateConfig.FtpUser, ABHotUpdateConfig.FtpPassword);
+                req.Credentials = new NetworkCredential(ftpUser, ftpPassword);
                 req.Proxy = null;
                 req.KeepAlive = false;
                 req.UsePassive = true;
-                req.EnableSsl = ABHotUpdateConfig.UseFtps;
+                req.EnableSsl = useFtps;
                 req.Method = WebRequestMethods.Ftp.UploadFile;
                 req.UseBinary = true;
                 req.ContentLength = new FileInfo(filePath).Length;
@@ -901,19 +910,23 @@ public class ABTools : EditorWindow
         isDownloading = true;
         SetStatus("正在获取远端文件列表…", "", 0f);
 
+        // 在主线程预缓存所有 Unity API 返回值，子线程中不能调用
+        string tmpPath = Application.persistentDataPath + "/ABCompareInfo_TMP.txt";
+        string ftpUrl = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], "ABCompareInfo.txt");
+        string ftpUser = ABHotUpdateConfig.FtpUser;
+        string ftpPassword = ABHotUpdateConfig.FtpPassword;
+        bool useFtps = ABHotUpdateConfig.UseFtps;
+
         Task.Run(() =>
         {
             try
             {
-                // 先尝试下载对比文件
-                string tmpPath = Application.persistentDataPath + "/ABCompareInfo_TMP.txt";
-                string url = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], "ABCompareInfo.txt");
-                FtpWebRequest req = (FtpWebRequest)WebRequest.Create(url);
-                req.Credentials = new NetworkCredential(ABHotUpdateConfig.FtpUser, ABHotUpdateConfig.FtpPassword);
+                FtpWebRequest req = (FtpWebRequest)WebRequest.Create(ftpUrl);
+                req.Credentials = new NetworkCredential(ftpUser, ftpPassword);
                 req.Proxy = null;
                 req.KeepAlive = false;
                 req.UsePassive = true;
-                req.EnableSsl = ABHotUpdateConfig.UseFtps;
+                req.EnableSsl = useFtps;
                 req.Method = WebRequestMethods.Ftp.DownloadFile;
                 req.UseBinary = true;
 
@@ -995,17 +1008,22 @@ public class ABTools : EditorWindow
     private async void FtpDownloadFileAsync(string localPath, string fileName, Action<bool> onDone)
     {
         bool ok = false;
+        // 在主线程预缓存，子线程中不能访问 Unity API 和实例字段
+        string ftpUrl = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], fileName);
+        string ftpUser = ABHotUpdateConfig.FtpUser;
+        string ftpPassword = ABHotUpdateConfig.FtpPassword;
+        bool useFtps = ABHotUpdateConfig.UseFtps;
+
         await Task.Run(() =>
         {
             try
             {
-                string url = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], fileName);
-                FtpWebRequest req = (FtpWebRequest)WebRequest.Create(url);
-                req.Credentials = new NetworkCredential(ABHotUpdateConfig.FtpUser, ABHotUpdateConfig.FtpPassword);
+                FtpWebRequest req = (FtpWebRequest)WebRequest.Create(ftpUrl);
+                req.Credentials = new NetworkCredential(ftpUser, ftpPassword);
                 req.Proxy = null;
                 req.KeepAlive = false;
                 req.UsePassive = true;
-                req.EnableSsl = ABHotUpdateConfig.UseFtps;
+                req.EnableSsl = useFtps;
                 req.Method = WebRequestMethods.Ftp.DownloadFile;
                 req.UseBinary = true;
 

@@ -4,7 +4,6 @@
 /// </summary>
 public static class ABHotUpdateConfig
 {
-    public const string FtpHost = "127.0.0.1";
     public const int FtpPort = 2121;
 
     public const string FtpUser = "Coolcoolcoo";

@@ -94,7 +94,7 @@ public class ABUpdateMgr : MonoBehaviour
                 updateInfoCallBack?.Invoke("对比文件下载结束");
                 string remoteInfo = File.ReadAllText(Application.persistentDataPath + "/ABCompareInfo_TMP.txt");
                 updateInfoCallBack?.Invoke("解析远端对比文件完成");
-                GetRemoteABCompareFileInfo(remoteInfo, remoteABInfo);
+                ParseABCompareInfo(remoteInfo, remoteABInfo);
                 //2加载本地资源对比文件
                 GetLocalABCompareFileInfo((isOver) =>
                 {
@@ -193,7 +193,10 @@ public class ABUpdateMgr : MonoBehaviour
         RunOnMainThread(() => overCallBack?.Invoke(isOver));
     }
 
-    public void GetRemoteABCompareFileInfo(string info, Dictionary<string, ABInfo> ABInfo)
+    /// <summary>
+    /// 解析 AB 对比文件内容，填充到指定字典
+    /// </summary>
+    public void ParseABCompareInfo(string info, Dictionary<string, ABInfo> ABInfo)
     {
         // 在控制台输出本地持久化数据路径，用于调试和验证路径正确性
         Debug.Log(Application.persistentDataPath);
@@ -203,13 +206,12 @@ public class ABUpdateMgr : MonoBehaviour
 
         // 使用竖线 '|' 作为分隔符，将 info 字符串拆分为字符串数组
         // 数组的每个元素代表一个 AB 包的信息（格式：name size md5）
-        string[] strs = info.Split('|');//把每个AB包的信息拆分出来
-        string[] infos = null;
+        string[] strs = info.Split('|');
         for (int i = 0; i < strs.Length; i++)
         {
             if (string.IsNullOrWhiteSpace(strs[i]))
                 continue;
-            infos = strs[i].Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] infos = strs[i].Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (infos.Length < 3)
             {
                 Debug.LogWarning("ABCompareInfo 格式异常，跳过片段: " + strs[i]);
@@ -253,7 +255,7 @@ public class ABUpdateMgr : MonoBehaviour
         yield return req.SendWebRequest();
         if (req.result == UnityWebRequest.Result.Success)
         {
-            GetRemoteABCompareFileInfo(req.downloadHandler.text, localABInfo);
+            ParseABCompareInfo(req.downloadHandler.text, localABInfo);
             overCallBack?.Invoke(true);
         }
         else
@@ -383,10 +385,7 @@ public class ABUpdateMgr : MonoBehaviour
             req.UseBinary = true;
             // 发送 FTP 请求并获取响应，转换为 FtpWebResponse 类型
             FtpWebResponse res = (FtpWebResponse)req.GetResponse();
-            // 从响应对象中获取数据流，用于读取服务器返回的文件数据
-            Stream downLoadStream = res.GetResponseStream();
-            // 创建本地文件流，使用 using 语句确保流对象在使用后自动释放
-            // File.Create() 创建或覆盖指定路径的文件
+            using (Stream downLoadStream = res.GetResponseStream())
             using (FileStream file = File.Create(localPath))
             {
                 // 创建字节数组作为缓冲区，大小为 2048 字节（2KB）
