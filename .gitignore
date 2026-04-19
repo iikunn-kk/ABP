@@ -6,8 +6,9 @@
 # 1. 先拉黑根目录下所有文件/文件夹
 *
 
-# 2. 例外：不拉黑 .gitignore 本身
+# 2. 例外：不拉黑 .gitignore 和README.md本身
 !/.gitignore
+!/README.md
 
 # 3. 例外：不拉黑 Assets 文件夹（必须保留父目录）
 !/Assets

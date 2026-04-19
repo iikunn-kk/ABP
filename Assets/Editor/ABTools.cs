@@ -2,9 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -44,40 +41,49 @@ public class ABTools : EditorWindow
         public bool Selected;
     }
 
+    // ===================== 协议选择 =====================
+    private int storageTypeIndex = 0;
+    private readonly string[] storageTypeNames = { "FTP", "HTTP" };
+
     // ===================== 多服务器配置 =====================
     private int serverConfigIndex = -1;
-    private List<FtpServerConfig> serverConfigs;
+    private List<ServerConfig> serverConfigs;
     private string[] serverConfigNames;
-    private const string EditorPrefsFtpKey = "ABTools_FtpServerUrl";
-    private const string EditorPrefsFtpConfigsKey = "ABTools_FtpConfigs";
-    private const string EditorPrefsFtpConfigIndexKey = "ABTools_FtpConfigIndex";
+    private const string EditorPrefsServerKey = "ABTools_FtpServerUrl";
+    private const string EditorPrefsServerConfigsKey = "ABTools_FtpConfigs";
+    private const string EditorPrefsServerConfigIndexKey = "ABTools_FtpConfigIndex";
+    private const string EditorPrefsStorageTypeKey = "ABTools_StorageType";
 
     [Serializable]
-    private class FtpServerConfig
+    private class ServerConfig
     {
         public string name;
         public string url;
+        public int storageType; // 0=FTP, 1=HTTP
         public string user;
         public string password;
         public int port;
         public bool useFtps;
+        public string httpToken;
 
-        public FtpServerConfig() { }
-        public FtpServerConfig(string name, string url, string user, string password, int port, bool useFtps)
+        public ServerConfig() { }
+        public ServerConfig(string name, string url, int storageType, string user, string password, int port, bool useFtps, string httpToken)
         {
             this.name = name;
             this.url = url;
+            this.storageType = storageType;
             this.user = user;
             this.password = password;
             this.port = port;
             this.useFtps = useFtps;
+            this.httpToken = httpToken;
         }
     }
 
     [Serializable]
-    private class FtpConfigList
+    private class ServerConfigList
     {
-        public List<FtpServerConfig> configs = new List<FtpServerConfig>();
+        public List<ServerConfig> configs = new List<ServerConfig>();
     }
 
     // ===================== 上传历史 =====================
@@ -145,7 +151,8 @@ public class ABTools : EditorWindow
     {
         titleContent = new GUIContent("AB 包工具");
         minSize = new Vector2(400, 560);
-        serverIP = EditorPrefs.GetString(EditorPrefsFtpKey, ABHotUpdateConfig.ServerBaseUrl);
+        serverIP = EditorPrefs.GetString(EditorPrefsServerKey, ABHotUpdateConfig.ServerBaseUrl);
+        storageTypeIndex = EditorPrefs.GetInt(EditorPrefsStorageTypeKey, (int)ABHotUpdateConfig.CurrentStorageType);
         LoadServerConfigs();
         LoadUploadHistory();
         fileListDirty = true;
@@ -161,14 +168,29 @@ public class ABTools : EditorWindow
     private void SaveServerIP()
     {
         if (serverIP != null)
-            EditorPrefs.SetString(EditorPrefsFtpKey, serverIP.Trim());
+        {
+            EditorPrefs.SetString(EditorPrefsServerKey, serverIP.Trim());
+            EditorPrefs.SetInt(EditorPrefsStorageTypeKey, storageTypeIndex);
+        }
     }
 
     private bool IsServerUrlValid()
     {
         string s = serverIP != null ? serverIP.Trim() : "";
         return s.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase)
-               || s.StartsWith("ftps://", StringComparison.OrdinalIgnoreCase);
+               || s.StartsWith("ftps://", StringComparison.OrdinalIgnoreCase)
+               || s.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+               || s.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>根据当前配置创建远端存储实例（编辑器用）</summary>
+    private IRemoteStorage CreateEditorStorage()
+    {
+        string baseUrl = serverIP?.Trim() ?? "";
+        if (storageTypeIndex == 1)
+            return new HttpRemoteStorage(baseUrl, ABHotUpdateConfig.HttpToken);
+        else
+            return new FtpRemoteStorage(baseUrl, ABHotUpdateConfig.FtpPort, ABHotUpdateConfig.FtpUser, ABHotUpdateConfig.FtpPassword, ABHotUpdateConfig.UseFtps);
     }
 
     // ===================== OnGUI 主界面 =====================
@@ -193,7 +215,7 @@ public class ABTools : EditorWindow
 
         EditorGUILayout.Space(6);
 
-        // ---- FTP 服务器配置 ----
+        // ---- 服务器配置 ----
         DrawServerConfigSection();
 
         EditorGUILayout.Space(6);
@@ -284,7 +306,7 @@ public class ABTools : EditorWindow
 
     private void DrawServerConfigSection()
     {
-        EditorGUILayout.LabelField("FTP 服务器", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("资源服务器", EditorStyles.boldLabel);
 
         // 配置下拉
         if (serverConfigNames != null && serverConfigNames.Length > 0)
@@ -297,20 +319,26 @@ public class ABTools : EditorWindow
             }
         }
 
+        // 协议选择
+        int prevType = storageTypeIndex;
+        storageTypeIndex = GUILayout.Toolbar(storageTypeIndex, storageTypeNames, GUILayout.Height(22));
+        if (prevType != storageTypeIndex) SaveServerIP();
+
         // 手动输入
         string prevIP = serverIP;
+        string hint = storageTypeIndex == 1 ? "http:// 或 https:// 前缀，例如 http://cdn.example.com" : "ftp:// 前缀，例如 ftp://127.0.0.1";
         serverIP = EditorGUILayout.TextField(
-            new GUIContent("资源服务器", "须带协议前缀，例如 ftp://127.0.0.1"),
+            new GUIContent("服务器地址", hint),
             serverIP);
         if (prevIP != serverIP)
         {
             SaveServerIP();
-            serverConfigIndex = -1; // 手动修改时取消下拉选中
+            serverConfigIndex = -1;
         }
 
         if (!IsServerUrlValid())
         {
-            EditorGUILayout.HelpBox("FTP 上传需要填写以 ftp:// 或 ftps:// 开头的地址。", MessageType.Warning);
+            EditorGUILayout.HelpBox("请填写以 ftp://、ftps://、http:// 或 https:// 开头的地址。", MessageType.Warning);
         }
 
         // 配置管理按钮
@@ -323,18 +351,19 @@ public class ABTools : EditorWindow
         }
     }
 
-    private void ApplyServerConfig(FtpServerConfig cfg)
+    private void ApplyServerConfig(ServerConfig cfg)
     {
         serverIP = cfg.url;
+        storageTypeIndex = cfg.storageType;
         SaveServerIP();
     }
 
     private void SaveCurrentAsConfig()
     {
         string name = "配置 " + (serverConfigs.Count + 1);
-        var cfg = new FtpServerConfig(name, serverIP?.Trim() ?? "",
+        var cfg = new ServerConfig(name, serverIP?.Trim() ?? "", storageTypeIndex,
             ABHotUpdateConfig.FtpUser, ABHotUpdateConfig.FtpPassword,
-            ABHotUpdateConfig.FtpPort, ABHotUpdateConfig.UseFtps);
+            ABHotUpdateConfig.FtpPort, ABHotUpdateConfig.UseFtps, ABHotUpdateConfig.HttpToken);
         serverConfigs.Add(cfg);
         RefreshConfigNames();
         serverConfigIndex = serverConfigs.Count - 1;
@@ -348,6 +377,9 @@ public class ABTools : EditorWindow
         {
             string name = serverConfigs[serverConfigIndex].name;
             serverConfigs.RemoveAt(serverConfigIndex);
+            // 重新编号：确保配置名连续
+            for (int i = 0; i < serverConfigs.Count; i++)
+                serverConfigs[i].name = "配置 " + (i + 1);
             RefreshConfigNames();
             serverConfigIndex = -1;
             SaveServerConfigs();
@@ -364,29 +396,29 @@ public class ABTools : EditorWindow
 
     private void LoadServerConfigs()
     {
-        string json = EditorPrefs.GetString(EditorPrefsFtpConfigsKey, "");
+        string json = EditorPrefs.GetString(EditorPrefsServerConfigsKey, "");
         if (!string.IsNullOrEmpty(json))
         {
             try
             {
-                var list = JsonUtility.FromJson<FtpConfigList>(json);
-                serverConfigs = list?.configs ?? new List<FtpServerConfig>();
+                var list = JsonUtility.FromJson<ServerConfigList>(json);
+                serverConfigs = list?.configs ?? new List<ServerConfig>();
             }
-            catch { serverConfigs = new List<FtpServerConfig>(); }
+            catch { serverConfigs = new List<ServerConfig>(); }
         }
         else
         {
-            serverConfigs = new List<FtpServerConfig>();
+            serverConfigs = new List<ServerConfig>();
         }
-        serverConfigIndex = EditorPrefs.GetInt(EditorPrefsFtpConfigIndexKey, -1);
+        serverConfigIndex = EditorPrefs.GetInt(EditorPrefsServerConfigIndexKey, -1);
         RefreshConfigNames();
     }
 
     private void SaveServerConfigs()
     {
-        var list = new FtpConfigList { configs = serverConfigs };
-        EditorPrefs.SetString(EditorPrefsFtpConfigsKey, JsonUtility.ToJson(list));
-        EditorPrefs.SetInt(EditorPrefsFtpConfigIndexKey, serverConfigIndex);
+        var list = new ServerConfigList { configs = serverConfigs };
+        EditorPrefs.SetString(EditorPrefsServerConfigsKey, JsonUtility.ToJson(list));
+        EditorPrefs.SetInt(EditorPrefsServerConfigIndexKey, serverConfigIndex);
     }
 
     // ===================== 操作按钮区 =====================
@@ -414,14 +446,12 @@ public class ABTools : EditorWindow
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button(new GUIContent(
-                        isUploading ? "上传中…" : "上传选中文件",
-                        "上传勾选的文件到 FTP"), GUILayout.Height(30)))
+                string uploadLabel = isUploading ? "上传中…" : "上传选中文件";
+                if (GUILayout.Button(new GUIContent(uploadLabel, "上传勾选的文件到远端"), GUILayout.Height(30)))
                     StartUploadSelectedFiles();
 
-                if (GUILayout.Button(new GUIContent(
-                        isDownloading ? "下载中…" : "下载远端到本地",
-                        "从 FTP 下载所有远端 AB 包到本地"), GUILayout.Height(30)))
+                string downloadLabel = isDownloading ? "下载中…" : "下载远端到本地";
+                if (GUILayout.Button(new GUIContent(downloadLabel, "从远端下载所有 AB 包到本地"), GUILayout.Height(30)))
                     StartDownloadAllFromRemote();
             }
         }
@@ -565,53 +595,45 @@ public class ABTools : EditorWindow
         isComparingRemote = true;
         SetStatus("正在对比远端…", "", 0f);
 
-        // 先确保本地列表是最新的
         RefreshFileList();
 
-        // 在主线程预缓存所有 Unity API 返回值
-        string tmpPath = Application.persistentDataPath + "/ABCompareInfo_TMP.txt";
-        string ftpUrl = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], "ABCompareInfo.txt");
-        string ftpUser = ABHotUpdateConfig.FtpUser;
-        string ftpPassword = ABHotUpdateConfig.FtpPassword;
-        bool useFtps = ABHotUpdateConfig.UseFtps;
+        // 在主线程创建存储实例，子线程中不能访问 Unity API
+        IRemoteStorage remoteStorage = CreateEditorStorage();
+        string platformFolder = targetStrings[nowSelIndex];
 
-        Task.Run(() =>
+        // 远端对比文件先存到临时路径
+        string tmpPath = Application.persistentDataPath + "/ABCompareInfo_TMP.txt";
+
+        Task.Run(async () =>
         {
             try
             {
-                FtpWebRequest req = (FtpWebRequest)WebRequest.Create(ftpUrl);
-                req.Credentials = new NetworkCredential(ftpUser, ftpPassword);
-                req.Proxy = null;
-                req.KeepAlive = false;
-                req.UsePassive = true;
-                req.EnableSsl = useFtps;
-                req.Method = WebRequestMethods.Ftp.DownloadFile;
-                req.UseBinary = true;
+                string remoteInfo;
+                // 尝试先用 DownloadTextAsync 获取文本
+                if (remoteStorage is FtpRemoteStorage ftp)
+                    remoteInfo = await ftp.DownloadTextAsync("ABCompareInfo.txt", serverIP?.Trim(), platformFolder);
+                else if (remoteStorage is HttpRemoteStorage http)
+                    remoteInfo = await http.DownloadTextAsync("ABCompareInfo.txt", serverIP?.Trim(), platformFolder);
+                else
+                    remoteInfo = await remoteStorage.DownloadTextAsync("ABCompareInfo.txt");
 
-                using (var response = (FtpWebResponse)req.GetResponse())
-                using (var respStream = response.GetResponseStream())
-                using (var file = File.Create(tmpPath))
-                {
-                    byte[] buf = new byte[2048];
-                    int read;
-                    while ((read = respStream.Read(buf, 0, buf.Length)) > 0)
-                        file.Write(buf, 0, read);
-                }
-                return true;
+                return remoteInfo;
             }
             catch (Exception ex)
             {
                 UnityEngine.Debug.LogWarning("远端对比文件下载失败: " + ex.Message);
-                return false;
+                return (string)null;
             }
         }).ContinueWith(t =>
         {
             EditorApplication.delayCall += () =>
             {
-                if (t.Result && File.Exists(tmpPath))
+                if (t.Result != null)
                 {
-                    string remoteInfo = File.ReadAllText(tmpPath);
-                    var remoteDict = ParseCompareInfo(remoteInfo);
+                    // 保存临时文件以兼容后续逻辑
+                    File.WriteAllText(Application.persistentDataPath + "/ABCompareInfo_TMP.txt", t.Result);
+
+                    var remoteDict = ParseCompareInfo(t.Result);
                     var localDict = new Dictionary<string, string>();
                     foreach (var e in abFileList)
                         localDict[e.FileName] = e.MD5;
@@ -632,7 +654,6 @@ public class ABTools : EditorWindow
                             remoteDiffs.Add(new RemoteDiffEntry { FileName = kv.Key, Type = DiffType.Add });
                     }
 
-                    // 排序：新增 > 修改 > 删除 > 不变
                     remoteDiffs = remoteDiffs
                         .OrderBy(d => d.Type == DiffType.Unchanged ? 3 : d.Type == DiffType.Delete ? 2 : d.Type == DiffType.Modify ? 1 : 0)
                         .ToList();
@@ -675,7 +696,6 @@ public class ABTools : EditorWindow
             return;
         }
 
-        // 只显示最近 5 条
         int showCount = Mathf.Min(uploadHistory.Count, 5);
         for (int i = uploadHistory.Count - 1; i >= uploadHistory.Count - showCount; i--)
         {
@@ -785,7 +805,6 @@ public class ABTools : EditorWindow
 
     private void StartUploadSelectedFiles()
     {
-        // 用勾选的文件列表
         var selected = abFileList.Where(e => e.Selected).ToList();
         if (selected.Count == 0)
         {
@@ -834,7 +853,7 @@ public class ABTools : EditorWindow
         SetStatus($"上传中: {task.FileName}", $"{uploadDone}/{uploadTotal}",
             uploadTotal > 0 ? (float)uploadDone / uploadTotal : 0f);
 
-        FtpUploadFileAsync(task.FilePath, task.FileName, success =>
+        UploadFileAsync(task.FilePath, task.FileName, success =>
         {
             if (success) uploadDone++;
             else { uploadFailed++; uploadDone++; }
@@ -844,55 +863,27 @@ public class ABTools : EditorWindow
         });
     }
 
-    private async void FtpUploadFileAsync(string filePath, string fileName, Action<bool> onDone)
+    private async void UploadFileAsync(string filePath, string fileName, Action<bool> onDone)
     {
         bool ok = false;
-        // 在主线程预缓存，子线程中不能访问 Unity API 和实例字段
-        string ftpUrl = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], fileName);
-        string ftpUser = ABHotUpdateConfig.FtpUser;
-        string ftpPassword = ABHotUpdateConfig.FtpPassword;
-        bool useFtps = ABHotUpdateConfig.UseFtps;
+        // 在主线程创建存储实例和缓存参数，子线程中不能访问 Unity API
+        IRemoteStorage remoteStorage = CreateEditorStorage();
+        string platformFolder = targetStrings[nowSelIndex];
 
-        await Task.Run(() =>
+        try
         {
-            try
-            {
-                FtpWebRequest req = WebRequest.Create(ftpUrl) as FtpWebRequest;
-                if (req == null)
-                    throw new InvalidOperationException("无法创建 FtpWebRequest，请检查 ftp:// 地址和端口。");
-
-                req.Credentials = new NetworkCredential(ftpUser, ftpPassword);
-                req.Proxy = null;
-                req.KeepAlive = false;
-                req.UsePassive = true;
-                req.EnableSsl = useFtps;
-                req.Method = WebRequestMethods.Ftp.UploadFile;
-                req.UseBinary = true;
-                req.ContentLength = new FileInfo(filePath).Length;
-
-                using (Stream upLoadStream = req.GetRequestStream())
-                using (FileStream file = File.OpenRead(filePath))
-                {
-                    byte[] bytes = new byte[2048];
-                    int contentLength = file.Read(bytes, 0, bytes.Length);
-                    while (contentLength != 0)
-                    {
-                        upLoadStream.Write(bytes, 0, contentLength);
-                        contentLength = file.Read(bytes, 0, bytes.Length);
-                    }
-                }
-                using (FtpWebResponse response = (FtpWebResponse)req.GetResponse())
-                {
-                    UnityEngine.Debug.Log(fileName + " 上传成功 " + response.StatusDescription);
-                }
-                ok = true;
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogError("上传失败 " + fileName + ": " + ex.Message);
-                ok = false;
-            }
-        });
+            if (remoteStorage is FtpRemoteStorage ftp)
+                ok = await ftp.UploadAsync(filePath, fileName, serverIP?.Trim(), platformFolder);
+            else if (remoteStorage is HttpRemoteStorage http)
+                ok = await http.UploadAsync(filePath, fileName, serverIP?.Trim(), platformFolder);
+            else
+                ok = await remoteStorage.UploadAsync(filePath, fileName);
+        }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogError("上传失败 " + fileName + ": " + ex.Message);
+            ok = false;
+        }
 
         EditorApplication.delayCall += () => onDone?.Invoke(ok);
     }
@@ -906,45 +897,32 @@ public class ABTools : EditorWindow
         if (!Directory.Exists(localDir))
             Directory.CreateDirectory(localDir);
 
-        // 先下载远端对比文件获取文件列表
         isDownloading = true;
         SetStatus("正在获取远端文件列表…", "", 0f);
 
-        // 在主线程预缓存所有 Unity API 返回值，子线程中不能调用
-        string tmpPath = Application.persistentDataPath + "/ABCompareInfo_TMP.txt";
-        string ftpUrl = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], "ABCompareInfo.txt");
-        string ftpUser = ABHotUpdateConfig.FtpUser;
-        string ftpPassword = ABHotUpdateConfig.FtpPassword;
-        bool useFtps = ABHotUpdateConfig.UseFtps;
+        // 在主线程创建存储实例和缓存参数
+        IRemoteStorage remoteStorage = CreateEditorStorage();
+        string platformFolder = targetStrings[nowSelIndex];
 
-        Task.Run(() =>
+        Task.Run(async () =>
         {
             try
             {
-                FtpWebRequest req = (FtpWebRequest)WebRequest.Create(ftpUrl);
-                req.Credentials = new NetworkCredential(ftpUser, ftpPassword);
-                req.Proxy = null;
-                req.KeepAlive = false;
-                req.UsePassive = true;
-                req.EnableSsl = useFtps;
-                req.Method = WebRequestMethods.Ftp.DownloadFile;
-                req.UseBinary = true;
+                string remoteInfo;
+                if (remoteStorage is FtpRemoteStorage ftp)
+                    remoteInfo = await ftp.DownloadTextAsync("ABCompareInfo.txt", serverIP?.Trim(), platformFolder);
+                else if (remoteStorage is HttpRemoteStorage http)
+                    remoteInfo = await http.DownloadTextAsync("ABCompareInfo.txt", serverIP?.Trim(), platformFolder);
+                else
+                    remoteInfo = await remoteStorage.DownloadTextAsync("ABCompareInfo.txt");
 
-                using (var response = (FtpWebResponse)req.GetResponse())
-                using (var respStream = response.GetResponseStream())
-                using (var file = File.Create(tmpPath))
-                {
-                    byte[] buf = new byte[2048];
-                    int read;
-                    while ((read = respStream.Read(buf, 0, buf.Length)) > 0)
-                        file.Write(buf, 0, read);
-                }
+                if (remoteInfo == null)
+                    return null;
 
-                var remoteDict = ParseCompareInfo(File.ReadAllText(tmpPath));
+                var remoteDict = ParseCompareInfo(remoteInfo);
                 var tasks = new List<UploadTask>();
                 foreach (var kv in remoteDict)
                     tasks.Add(new UploadTask { FilePath = localDir + kv.Key, FileName = kv.Key });
-                // 也下载对比文件本身
                 tasks.Add(new UploadTask { FilePath = localDir + "ABCompareInfo.txt", FileName = "ABCompareInfo.txt" });
                 return tasks;
             }
@@ -995,7 +973,7 @@ public class ABTools : EditorWindow
         SetStatus($"下载中: {task.FileName}", $"{downloadDone}/{downloadTotal}",
             downloadTotal > 0 ? (float)downloadDone / downloadTotal : 0f);
 
-        FtpDownloadFileAsync(task.FilePath, task.FileName, success =>
+        DownloadFileAsync(task.FilePath, task.FileName, success =>
         {
             if (success) downloadDone++;
             else { downloadFailed++; downloadDone++; }
@@ -1005,46 +983,27 @@ public class ABTools : EditorWindow
         });
     }
 
-    private async void FtpDownloadFileAsync(string localPath, string fileName, Action<bool> onDone)
+    private async void DownloadFileAsync(string localPath, string fileName, Action<bool> onDone)
     {
         bool ok = false;
-        // 在主线程预缓存，子线程中不能访问 Unity API 和实例字段
-        string ftpUrl = ABHotUpdateConfig.BuildFtpFileUrl(serverIP.Trim(), targetStrings[nowSelIndex], fileName);
-        string ftpUser = ABHotUpdateConfig.FtpUser;
-        string ftpPassword = ABHotUpdateConfig.FtpPassword;
-        bool useFtps = ABHotUpdateConfig.UseFtps;
+        // 在主线程创建存储实例和缓存参数
+        IRemoteStorage remoteStorage = CreateEditorStorage();
+        string platformFolder = targetStrings[nowSelIndex];
 
-        await Task.Run(() =>
+        try
         {
-            try
-            {
-                FtpWebRequest req = (FtpWebRequest)WebRequest.Create(ftpUrl);
-                req.Credentials = new NetworkCredential(ftpUser, ftpPassword);
-                req.Proxy = null;
-                req.KeepAlive = false;
-                req.UsePassive = true;
-                req.EnableSsl = useFtps;
-                req.Method = WebRequestMethods.Ftp.DownloadFile;
-                req.UseBinary = true;
-
-                using (var response = (FtpWebResponse)req.GetResponse())
-                using (var respStream = response.GetResponseStream())
-                using (var file = File.Create(localPath))
-                {
-                    byte[] buf = new byte[2048];
-                    int read;
-                    while ((read = respStream.Read(buf, 0, buf.Length)) > 0)
-                        file.Write(buf, 0, read);
-                }
-                UnityEngine.Debug.Log(fileName + " 下载成功");
-                ok = true;
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogError("下载失败 " + fileName + ": " + ex.Message);
-                ok = false;
-            }
-        });
+            if (remoteStorage is FtpRemoteStorage ftp)
+                ok = await ftp.DownloadAsync(fileName, localPath, serverIP?.Trim(), platformFolder);
+            else if (remoteStorage is HttpRemoteStorage http)
+                ok = await http.DownloadAsync(fileName, localPath, serverIP?.Trim(), platformFolder);
+            else
+                ok = await remoteStorage.DownloadAsync(fileName, localPath);
+        }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogError("下载失败 " + fileName + ": " + ex.Message);
+            ok = false;
+        }
 
         EditorApplication.delayCall += () => onDone?.Invoke(ok);
     }
