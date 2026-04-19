@@ -8,9 +8,6 @@ using UnityEngine;
 using System.Security.Cryptography;
 // 引用 System.Text 命名空间，提供文本处理类（如 StringBuilder）
 using System.Text;
-// 引用 Best.HTTP 的安全协议命名空间（此引用可能未使用，可以移除）
-using Best.HTTP.SecureProtocol.Org.BouncyCastle.Asn1;
-
 // 定义 CreateABCompare 类，用于创建 AB 包对比文件
 // 该类只在编辑器中使用，用于生成 AB 包的对比信息文件
 public class CreateABCompare

@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEngine.Events;
 /// <summary>
@@ -24,15 +25,31 @@ public class ABMgr : SingletonAutoMono<ABMgr>
     //字典 用字典来存储 加载过的AB包 
     private Dictionary<string, AssetBundle> abDic = new Dictionary<string, AssetBundle>();
 
-    /// <summary>
-    /// 这个AB包存放路径 方便修改
-    /// </summary>
-    private string PathUrl
+    private static string PersistentRoot =>
+        AppendSlash(Application.persistentDataPath);
+
+    private static string StreamingRoot =>
+        AppendSlash(Application.streamingAssetsPath);
+
+    private static string AppendSlash(string path)
     {
-        get
-        {
-            return Application.streamingAssetsPath + "/";
-        }
+        if (string.IsNullOrEmpty(path))
+            return "/";
+        char c = path[path.Length - 1];
+        if (c == '/' || c == '\\')
+            return path;
+        return path + "/";
+    }
+
+    /// <summary>
+    /// 热更包在 persistentDataPath，首包在 StreamingAssets；优先使用已下载的包。
+    /// </summary>
+    private string ResolveBundlePath(string bundleFileName)
+    {
+        string persistent = PersistentRoot + bundleFileName;
+        if (File.Exists(persistent))
+            return persistent;
+        return StreamingRoot + bundleFileName;
     }
 
     /// <summary>
@@ -61,7 +78,7 @@ public class ABMgr : SingletonAutoMono<ABMgr>
         //加载AB包
         if (mainAB == null)
         {
-            mainAB = AssetBundle.LoadFromFile(PathUrl + MainABName);
+            mainAB = AssetBundle.LoadFromFile(ResolveBundlePath(MainABName));
             manifest = mainAB.LoadAsset<AssetBundleManifest>("AssetBundleManifest");
         }
         //我们获取依赖包相关信息
@@ -72,7 +89,7 @@ public class ABMgr : SingletonAutoMono<ABMgr>
             //判断包是否加载过
             if (!abDic.ContainsKey(strs[i]))
             {
-                ab = AssetBundle.LoadFromFile(PathUrl + strs[i]);
+                ab = AssetBundle.LoadFromFile(ResolveBundlePath(strs[i]));
                 abDic.Add(strs[i], ab);
             }
         }
@@ -80,7 +97,7 @@ public class ABMgr : SingletonAutoMono<ABMgr>
         //如果没有加载过 再加载
         if (!abDic.ContainsKey(abName))
         {
-            ab = AssetBundle.LoadFromFile(PathUrl + abName);
+            ab = AssetBundle.LoadFromFile(ResolveBundlePath(abName));
             abDic.Add(abName, ab);
         }
     }

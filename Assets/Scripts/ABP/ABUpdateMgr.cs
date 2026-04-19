@@ -1,47 +1,16 @@
-// 引用 System 命名空间，提供基础数据类型和异常类
 using System;
 using System.Collections;
-
-// 引用 System.Collections.Generic 命名空间，提供泛型集合类（如 Dictionary、List）
 using System.Collections.Generic;
-// 引用 System.IO 命名空间，提供文件和目录操作类（如 File、FileStream）
 using System.IO;
-// 引用 System.Net 命名空间，提供网络请求类（如 FtpWebRequest、NetworkCredential）
 using System.Net;
-// 引用 System.Threading.Tasks 命名空间，提供异步编程支持（如 Task）
 using System.Threading.Tasks;
-
-// 引用 UnityEngine 命名空间，提供 Unity 引擎核心功能（如 Debug、MonoBehaviour）
 using UnityEngine;
-// 引用 UnityEngine.Events 命名空间，提供 Unity 事件系统（如 UnityAction）
 using UnityEngine.Events;
 using UnityEngine.Networking;
 
-// 引用 UnityEngine.UIElements 命名空间，提供 UI 系统支持
-using UnityEngine.UIElements;
-
-// 定义 ABUpdateMgr 类，继承自 MonoBehaviour，使其可以挂载到 GameObject 上并使用 Unity 生命周期方法
 public class ABUpdateMgr : MonoBehaviour
 {
-    // 定义 FTP 服务器主机地址常量，使用本地回环地址 127.0.0.1 表示本机
-    private const string FtpHost = "127.0.0.1";
-    // 定义 FTP 服务器端口号常量，使用非标准端口 2121（FileZilla Server 默认是 21）
-    private const int FtpPort = 2121;
-    // 定义 FTP 服务器远程目录路径常量，AB 包存储在 /AB/PC/ 目录下
-    private const string FtpRemoteDir = "/AB/PC/";
-    // 定义 FTP 登录用户名常量，用于身份验证
-    private const string FtpUser = "Coolcoolcoo";
-    // 定义 FTP 登录密码常量，与用户名配合完成身份验证
-    private const string FtpPassword = "Coolcoolcoo123";
-    //资源服务器IP
-    private string serverIP = "ftp://127.0.0.1";
-
-    // 定义静态布尔变量，控制是否启用 FTPS（FTP over SSL/TLS）加密传输
-    // 503 Use AUTH first 说明服务器要求显式 FTPS（AUTH TLS）
-    private static readonly bool UseFtps = false;
-    // 定义静态布尔变量，控制是否允许不安全的自签名证书
-    // 测试环境自签名证书可放行；正式环境请设为 false 以提高安全性
-    private static bool AllowInsecureCertificate = true;
+    private readonly Queue<Action> mainThreadActions = new Queue<Action>();
     // 定义静态私有字段，用于存储 ABUpdateMgr 的单例实例
     private static ABUpdateMgr instance;
     // 定义静态公共属性，提供对单例实例的访问
@@ -63,6 +32,33 @@ public class ABUpdateMgr : MonoBehaviour
         }
     }
 
+    private void Update()
+    {
+        lock (mainThreadActions)
+        {
+            while (mainThreadActions.Count > 0)
+            {
+                try
+                {
+                    mainThreadActions.Dequeue()?.Invoke();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogException(e);
+                }
+            }
+        }
+    }
+
+    private void RunOnMainThread(Action action)
+    {
+        if (action == null)
+            return;
+        lock (mainThreadActions)
+        {
+            mainThreadActions.Enqueue(action);
+        }
+    }
 
     // 定义公共字典字段，用于存储远端 AB 包的信息
     // 键为 AB 包名称（string），值为 ABInfo 对象
@@ -194,13 +190,7 @@ public class ABUpdateMgr : MonoBehaviour
             });
             --reDownLoadMaxNum;
         }
-        //回调函在此处进行调用，告诉外部成功与否
-        overCallBack?.Invoke(isOver);
-        if (isOver)
-        {
-
-        }
-
+        RunOnMainThread(() => overCallBack?.Invoke(isOver));
     }
 
     public void GetRemoteABCompareFileInfo(string info, Dictionary<string, ABInfo> ABInfo)
@@ -214,20 +204,19 @@ public class ABUpdateMgr : MonoBehaviour
         // 使用竖线 '|' 作为分隔符，将 info 字符串拆分为字符串数组
         // 数组的每个元素代表一个 AB 包的信息（格式：name size md5）
         string[] strs = info.Split('|');//把每个AB包的信息拆分出来
-        // 声明字符串数组变量，用于存储单个 AB 包的详细信息
         string[] infos = null;
-        // 遍历 strs 数组，处理每个 AB 包的信息
         for (int i = 0; i < strs.Length; i++)
         {
-            // 使用空格 ' ' 作为分隔符，将单个 AB 包的信息拆分为 name、size、md5 三个部分
-            infos = strs[i].Split(' ');//又把一个AB包的信息拆分出来
+            if (string.IsNullOrWhiteSpace(strs[i]))
+                continue;
+            infos = strs[i].Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (infos.Length < 3)
+            {
+                Debug.LogWarning("ABCompareInfo 格式异常，跳过片段: " + strs[i]);
+                continue;
+            }
 
-            // 将解析出的 AB 包信息添加到 remoteABInfo 字典中
-            // infos[0] 是 AB 包名称，作为字典的键
-            // new ABInfo(...) 创建新的 ABInfo 对象，作为字典的值
-            //记录每一个远端AB包的信息，之后用来对比
-            //用AB包的名字作为键,AB包的信息作为值
-            ABInfo.Add(infos[0], new ABInfo(infos[0], infos[1], infos[2]));
+            ABInfo[infos[0]] = new ABInfo(infos[0], infos[1], infos[2]);
         }
 
     }
@@ -307,18 +296,35 @@ public class ABUpdateMgr : MonoBehaviour
                 isOver = false;
                 // 使用 Task.Run 将同步的下载操作放到线程池中执行，避免阻塞主线程
                 // await 关键字等待任务完成，但不会阻塞主线程
+                string bundleName = downLoadList[i];
+                string savedPath = localPath + bundleName;
                 await Task.Run(() =>
                 {
-                    // 调用 DownLoadFile 方法下载文件，返回值表示是否下载成功
-                    isOver = DownLoadFile(downLoadList[i], localPath + downLoadList[i]);
+                    isOver = DownLoadFile(bundleName, savedPath);
+                    if (isOver && remoteABInfo.TryGetValue(bundleName, out ABInfo meta))
+                    {
+                        string diskMd5 = ABHashUtil.ComputeMD5File(savedPath);
+                        if (!string.Equals(diskMd5, meta.md5, StringComparison.OrdinalIgnoreCase))
+                        {
+                            Debug.LogWarning("下载后 MD5 不一致，将重试: " + bundleName);
+                            try
+                            {
+                                File.Delete(savedPath);
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.Log(ex.Message);
+                            }
+                            isOver = false;
+                        }
+                    }
                 });
-                // 如果文件下载成功
                 if (isOver)
                 {
-                    // 调用进度更新回调，通知外部更新进度（当前完成数 +1，总数不变）
-                    updatePro(++downLoadOverNum + "/" + downLoadMaxNum);
-                    // 将下载成功的文件名添加到临时列表，稍后从待下载列表中移除
-                    tempList.Add(downLoadList[i]);//下载成功的记录下来
+                    int done = ++downLoadOverNum;
+                    RunOnMainThread(() =>
+                        updatePro?.Invoke(done + "/" + downLoadMaxNum));
+                    tempList.Add(bundleName);
                 }
             }
             // 把成功下载的文件名，从待下载列表中移除
@@ -331,8 +337,8 @@ public class ABUpdateMgr : MonoBehaviour
             // 减少剩余重试次数
             --reDownLoadMaxNum;
         }
-        // 所有内容都下载完毕了，那么就会传一个 true 给外部；如果还有未下载的文件，传 false
-        overCallBack(downLoadList.Count == 0);
+        bool allOk = downLoadList.Count == 0;
+        RunOnMainThread(() => overCallBack?.Invoke(allOk));
     }
 
     // 定义私有方法，用于从 FTP 服务器下载文件到本地指定路径
@@ -348,21 +354,10 @@ public class ABUpdateMgr : MonoBehaviour
             // 创建 FTP/FTPS 链接
 
             // string url = $"ftp://{FtpHost}:{FtpPort}{FtpRemoteDir}{Uri.EscapeDataString(fileName)}";
-            string pInfo =
-#if UNITY_IOS
-            "IOS";
-#elif UNITY_ANDROID
-            "Android";
-#else
-            "PC";
-#endif
-            string url = serverIP + ":2121/AB/" + pInfo + "/" + Uri.EscapeDataString(fileName);
-            // 使用 WebRequest.Create 创建请求，并转换为 FtpWebRequest 类型
+            string url = ABHotUpdateConfig.BuildFtpFileUrl(fileName);
             FtpWebRequest req = WebRequest.Create(url) as FtpWebRequest;
 
-            // 设置 FTP 请求的身份验证凭证，使用用户名和密码
-            // 凭证
-            req.Credentials = new NetworkCredential(FtpUser, FtpPassword);
+            req.Credentials = new NetworkCredential(ABHotUpdateConfig.FtpUser, ABHotUpdateConfig.FtpPassword);
             //其他设置
             // 将代理设置为 null，避免使用代理服务器，提高连接速度
             //设置代理为null
@@ -377,7 +372,7 @@ public class ABUpdateMgr : MonoBehaviour
             req.UsePassive = true;
             // 设置 EnableSsl 控制是否启用 SSL/TLS 加密传输
             // 启用 FTPS（显式 AUTH TLS）
-            req.EnableSsl = UseFtps;
+            req.EnableSsl = ABHotUpdateConfig.UseFtps;
             // 设置请求方法为下载文件
             // WebRequestMethods.Ftp.UploadFile 是上传，DownloadFile 是下载
             //操作命令上传

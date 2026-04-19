@@ -58,13 +58,13 @@ public class UploadAB
 
                 // 创建 FTP/FTPS 链接
                 // string url = $"ftp://{FtpHost}:{FtpPort}{FtpRemoteDir}{Uri.EscapeDataString(fileName)}";
-                string url = "ftp://127.0.0.1:2121/AB/PC/" + Uri.EscapeDataString(fileName);
+                string url = ABHotUpdateConfig.BuildFtpFileUrl(fileName);
                 FtpWebRequest req = WebRequest.Create(url) as FtpWebRequest;
                 if (req == null)
                     throw new InvalidOperationException("无法创建 FtpWebRequest，请检查 ftp:// 地址和端口。");
 
                 // 凭证
-                req.Credentials = new NetworkCredential("Coolcoolcoo", "Coolcoolcoo123");
+                req.Credentials = new NetworkCredential(ABHotUpdateConfig.FtpUser, ABHotUpdateConfig.FtpPassword);
                 //其他设置
                 //设置代理为null
                 req.Proxy = null;
