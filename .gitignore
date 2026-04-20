@@ -26,6 +26,9 @@
 !/Assets/Scripts/ABP
 !/Assets/Scripts/ABP/**/*
 
+!/Assets/Scripts/Base
+!/Assets/Scripts/Base/SingletonAutoMono.cs
+
 
 
 
